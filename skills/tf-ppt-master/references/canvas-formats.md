@@ -28,7 +28,9 @@ Canvas dimensions imply no title band, topology, or recurring chrome; reserve sp
 
 ## Typography Scale Start
 
-**Hard rule — normative owner**: this section owns the initial body-size anchor and sanity band for every registered or custom canvas. Strategist and Quick consume it directly; Confirm UI maintains an exact executable mirror and must not infer alternate canvas classes or values. Values are unitless SVG px.
+**Hard rule — normative owner**: this section owns the initial **body-size anchor and sanity band** for every registered or custom canvas. Strategist and Quick consume it directly; Confirm UI maintains an exact executable mirror and must not infer alternate canvas classes or values. Values are unitless SVG px.
+
+Pick the body size here, then derive every other role (display / title / section / subheading / body / caption / label) from the normative **type ramp** in [`shared-standards-core.md`](./shared-standards-core.md) §2 — every text element must set an explicit `fontSize`, and no role may fall below that ramp's floor.
 
 | Canvas | Reading mode | Advisory body band | Initial body |
 |---|---|---:|---:|
@@ -54,4 +56,4 @@ low = round(span * 0.025); start = round(span * 0.029); high = round(span * 0.03
 
 `story` and `banner` share one span but not one measure: the same body sits on a 1920 px line in `banner` and a 1080 px line in `story`, so portrait pages settle low. Executor's layout values and icon sizes are 1280-wide: scale by canvas width ÷ 1280, and stack regions instead of splitting once a column holds under about 30 body characters.
 
-**Default — starting anchor, not a floor (confirmed identity, source fidelity, or viewing conditions may override)**: start from the table or formula, then resolve the role ramp and page density from content and delivery context; the band only flags unusual values and is not a validation gate. Apply the viewing-distance baseline in [`shared-standards-core.md`](./shared-standards-core.md) instead of silently shrinking a recurring role to make content fit.
+**Default — starting anchor, not a floor (confirmed identity, source fidelity, or viewing conditions may override)**: start from the table or formula, then resolve the role ramp and page density from content and delivery context; the band only flags unusual values and is not a validation gate. Apply the viewing-distance baseline in [`shared-standards-core.md`](./shared-standards-core.md) §3 instead of silently shrinking a recurring role to make content fit — and never below that file's §2 floor.

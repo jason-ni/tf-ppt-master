@@ -88,6 +88,7 @@ all, it uses one for **every** section in the structure map — never just some.
 - `references/modes/_index.md` → pick communication mode
 - `references/visual-styles/_index.md` → pick visual style
 - `references/canvas-formats.md` → canvas size
+- `references/shared-standards-core.md` → units, normative type ramp + floor, viewing-distance baseline
 - `templates/brands/<brand>/templates/design_spec.md` → if user mentions a brand
 - `templates/styles/<style>/templates/design_spec.md` → if a matching style exists
 
@@ -129,6 +130,17 @@ Then, for **each page `PNN` in `deck_plan.md` order**, run this loop:
      editable equation; do NOT pre-escape and never type a long formula as text
    - Charts → `create_chart`
    - Tables → `add_table` or `add_element` (type: `table`)
+
+**Typography — every text element sets an explicit `fontSize` from the ramp.**
+Never rely on the renderer default. Read the body anchor for the canvas + reading
+mode from `references/canvas-formats.md`, then take the other roles from the
+normative ramp in `references/shared-standards-core.md` §2. At `ppt169`
+(1280×720), `presentation` mode that is: display 72 · title 52 · section 40 ·
+subheading 34 · body 32 · caption 22 · label 18 (the `balanced` / `text` columns
+and the hard floor are in that file). The rendered slide is the check: if the
+body looks small, it is — raise the size, and cut or stack content rather than
+shrinking a recurring role below the floor.
+
 4. **Render this page**: `pptx_render_slide(target, slide_index=PNN-1,
    to_file=true, output_path=...)`.
 5. **Validate the render by looking at the image**:
