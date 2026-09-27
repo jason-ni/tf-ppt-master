@@ -330,12 +330,44 @@ def path_d_to_segments(d: str) -> list[dict[str, Any]]:
     return segments
 
 
+def segments_to_path_d(segments: list[dict[str, Any]]) -> str:
+    """Serialize ``CustomGeometrySegment`` dicts back into an SVG path ``d``.
+
+    Inverse of :func:`path_d_to_segments`, used to populate the viewer's
+    ``pathData``. Its custom-geometry renderer needs ``pathData`` +
+    ``pathWidth`` + ``pathHeight``; ``customGeometryPaths`` alone renders as a
+    plain preset rectangle.
+    """
+    parts: list[str] = []
+    for seg in segments:
+        kind = seg.get("type")
+        if kind == "moveTo":
+            p = seg["pt"]
+            parts.append(f"M {p['x']} {p['y']}")
+        elif kind == "lineTo":
+            p = seg["pt"]
+            parts.append(f"L {p['x']} {p['y']}")
+        elif kind == "quadBezTo":
+            p = seg["pts"]
+            parts.append(f"Q {p[0]['x']} {p[0]['y']} {p[1]['x']} {p[1]['y']}")
+        elif kind == "cubicBezTo":
+            p = seg["pts"]
+            parts.append(
+                f"C {p[0]['x']} {p[0]['y']} {p[1]['x']} {p[1]['y']} {p[2]['x']} {p[2]['y']}"
+            )
+        elif kind == "close":
+            parts.append("Z")
+    return " ".join(parts)
+
+
 # ── style ───────────────────────────────────────────────────────────────────
 
-def _resolve_color(value: str | None) -> str | None:
+def _resolve_color(value: str | None, current_color: str | None = None) -> str | None:
     if not value:
         return None
     value = value.strip()
+    if value.lower() == "currentcolor":
+        return current_color
     if value in {"none", "transparent"}:
         return None
     if value.startswith("#"):
@@ -356,7 +388,8 @@ def _resolve_color(value: str | None) -> str | None:
 
 
 def _shape_style(elem: ET.Element, gradients: dict[str, dict[str, Any]],
-                 css: dict[str, str] | None = None) -> dict[str, Any]:
+                 css: dict[str, str] | None = None,
+                 current_color: str | None = None) -> dict[str, Any]:
     style: dict[str, Any] = {}
     fill = _prop(elem, "fill", css)
     stroke = _prop(elem, "stroke", css)
@@ -370,14 +403,14 @@ def _shape_style(elem: ET.Element, gradients: dict[str, dict[str, Any]],
         if grad:
             style.update(grad)
     else:
-        color = _resolve_color(fill)
+        color = _resolve_color(fill, current_color)
         if color:
             style["fillColor"] = color
         elif fill == "none":
             style["fillMode"] = "none"
             style["fillColor"] = None
 
-    stroke_color = _resolve_color(stroke)
+    stroke_color = _resolve_color(stroke, current_color)
     if stroke_color:
         style["strokeColor"] = stroke_color
         style["strokeWidth"] = _num(stroke_width, 1.0)
@@ -571,9 +604,11 @@ class _Builder:
     def __init__(self, canvas_w: float, canvas_h: float, markers: set[str] | None = None,
                  base_dir: Path | None = None,
                  css_rules: list[tuple[int, dict[str, Any], dict[str, str]]] | None = None,
-                 filters: dict[str, dict[str, Any]] | None = None) -> None:
+                 filters: dict[str, dict[str, Any]] | None = None,
+                 current_color: str | None = None) -> None:
         self.canvas_w = canvas_w
         self.canvas_h = canvas_h
+        self.current_color = current_color
         self.markers = markers or set()
         self.base_dir = base_dir
         self.css_rules = css_rules or []
@@ -607,7 +642,7 @@ class _Builder:
 
         matrix = _matmul(matrix, _parse_transform(_attr(elem, "transform")))
         css = _css_for(elem, self.css_rules)
-        style = _shape_style(elem, gradients, css)
+        style = _shape_style(elem, gradients, css, self.current_color)
         _apply_markers(style, elem, self.markers)
         filter_id = _filter_ref(_prop(elem, "filter", css))
         if filter_id and filter_id in self.filters:
@@ -702,7 +737,9 @@ class _Builder:
             segments.append({"type": "close"})
         base = self._base(ox, oy, w, h)
         return Element(type="shape", shape_style={k: v for k, v in style.items() if v is not None},
-                       extra={"customGeometryPaths": [{"width": round(w, 2), "height": round(h, 2), "segments": segments}]},
+                       extra={"customGeometryPaths": [{"width": round(w, 2), "height": round(h, 2), "segments": segments}],
+                              "pathData": segments_to_path_d(segments),
+                              "pathWidth": round(w, 2), "pathHeight": round(h, 2)},
                        **base).to_dict()
 
     def _path(self, elem: ET.Element, m: Matrix, style: dict[str, Any], gradients: dict[str, Any]) -> dict[str, Any]:
@@ -740,7 +777,9 @@ class _Builder:
             local.append(seg)
         base = self._base(ox, oy, w, h)
         return Element(type="shape", shape_style={k: v for k, v in style.items() if v is not None},
-                       extra={"customGeometryPaths": [{"width": round(w, 2), "height": round(h, 2), "segments": local}]},
+                       extra={"customGeometryPaths": [{"width": round(w, 2), "height": round(h, 2), "segments": local}],
+                              "pathData": segments_to_path_d(local),
+                              "pathWidth": round(w, 2), "pathHeight": round(h, 2)},
                        **base).to_dict()
 
     def _image(self, elem: ET.Element, m: Matrix) -> dict[str, Any] | None:
@@ -758,8 +797,12 @@ class _Builder:
         css = css or {}
         x = _num(_attr(elem, "x"))
         y = _num(_attr(elem, "y"))
-        font_size = _num(_prop(elem, "font-size", css), 18.0)
-        fill = _resolve_color(_prop(elem, "fill", css)) or "#000000"
+        # Font size is a scalar the transform matrix cannot carry through
+        # geometry, so scale it explicitly: this is what lets an SVG be placed
+        # at an arbitrary rect via a `<g transform="scale(...)">` wrapper.
+        scale = abs(m[0]) or 1.0
+        font_size = _num(_prop(elem, "font-size", css), 18.0) * scale
+        fill = _resolve_color(_prop(elem, "fill", css), self.current_color) or "#000000"
         family = _first_family(_prop(elem, "font-family", css))
         anchor = (_prop(elem, "text-anchor", css) or "start").strip()
         weight = _prop(elem, "font-weight", css)
@@ -787,8 +830,10 @@ class _Builder:
             if txt:
                 if starts_line:
                     lines.append([])
-                lines[-1].append((txt, run_style(_num(_attr(node, "font-size"), font_size),
-                                                 _resolve_color(_prop(node, "fill", _css_for(node, self.css_rules))) or fill, node)))
+                tspan_size_attr = _attr(node, "font-size")
+                tspan_size = (_num(tspan_size_attr, 18.0) * scale) if tspan_size_attr else font_size
+                lines[-1].append((txt, run_style(tspan_size,
+                                                 _resolve_color(_prop(node, "fill", _css_for(node, self.css_rules)), self.current_color) or fill, node)))
             if node.tail and node.tail.strip():
                 lines[-1].append((node.tail, run_style(font_size, fill)))
         lines = [line for line in lines if line]
@@ -835,6 +880,7 @@ def svg_to_slide(
     animation_groups: dict[str, dict[str, Any]] | None = None,
     animation_auto: bool = False,
     animation_default_effect: str | None = None,
+    current_color: str | None = None,
 ) -> dict[str, Any]:
     """Convert one SVG document into a ``pptx-viewer-json`` slide record.
 
@@ -842,6 +888,8 @@ def svg_to_slide(
     object; ``animation_auto`` synthesises it from the discovered group ids;
     ``animation_default_effect`` applies one effect to every group lacking a
     config. Any of these produces ``slide['animations']`` (entrance effects).
+    ``current_color`` resolves SVG ``currentColor`` (icons use it for their
+    fill/stroke).
     """
     root = ET.fromstring(svg_text)
     gradients = _parse_gradients(root)
@@ -850,7 +898,7 @@ def svg_to_slide(
     filters = _parse_filters(root)
     builder = _Builder(canvas_w, canvas_h, markers=markers,
                        base_dir=Path(base_dir) if base_dir is not None else None,
-                       css_rules=css_rules, filters=filters)
+                       css_rules=css_rules, filters=filters, current_color=current_color)
     builder.next_id = start_shape_id
 
     viewbox = _attr(root, "viewBox")
@@ -894,6 +942,7 @@ def svg_files_to_document(
     animations: dict[str, Any] | None = None,
     animation_auto: bool = False,
     animation_default_effect: str | None = None,
+    current_color: str | None = None,
 ) -> dict[str, Any]:
     """Build a full ``pptx-viewer-json`` document from SVG page texts.
 
@@ -921,5 +970,6 @@ def svg_files_to_document(
                                    slide_id=f"ppt/slides/slide{index}.xml", base_dir=base_dir,
                                    animation_groups=groups,
                                    animation_auto=animation_auto and not groups,
-                                   animation_default_effect=animation_default_effect))
+                                   animation_default_effect=animation_default_effect,
+                                   current_color=current_color))
     return build_document(slides, width=int(canvas_w), height=int(canvas_h))
